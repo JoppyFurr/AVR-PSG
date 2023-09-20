@@ -192,10 +192,10 @@ int write_frame (void)
      *  vv   ->   01: Tone0 and Tone1 volume change follows
      *       ->   10: Tone2 and Noise volume change follows
      *
-     *  dd   ->   00: No delay
-     *            01: 1/60s delay after this data frame
-     *            10: 2/60s delay after this data frame
-     *            11: 3/60s delay after this data frame
+     *  dd   ->   00: 1/60s delay after this data frame
+     *            01: 2/60s delay after this data frame
+     *            10: 3/60s delay after this data frame
+     *            11: 4/60s delay after this data frame
      *
      *  Bytes follow in the order they appear in the above list.
      *  Two bytes for the 10-bit tone registers.
@@ -205,31 +205,31 @@ int write_frame (void)
     if (current_state.tone_0 != previous_state.tone_0)
     {
         frame[0] |= TONE_0_BIT;
-        frame[frame_size++] = current_state.tone_0 & 0x0f;
-        frame[frame_size++] = current_state.tone_0 >> 4;
+        frame[frame_size++] = current_state.tone_0        & 0x0f;
+        frame[frame_size++] = (current_state.tone_0 >> 4) & 0x3f;
     }
 
     /* Tone1 */
     if (current_state.tone_1 != previous_state.tone_1)
     {
         frame[0] |= TONE_1_BIT;
-        frame[frame_size++] = current_state.tone_1 & 0x0f;
-        frame[frame_size++] = current_state.tone_1 >> 4;
+        frame[frame_size++] = current_state.tone_1        & 0x0f;
+        frame[frame_size++] = (current_state.tone_1 >> 4) & 0x3f;
     }
 
     /* Tone2 */
     if (current_state.tone_2 != previous_state.tone_2)
     {
         frame[0] |= TONE_2_BIT;
-        frame[frame_size++] = current_state.tone_2 & 0x0f;
-        frame[frame_size++] = current_state.tone_2 >> 4;
+        frame[frame_size++] = current_state.tone_2        & 0x0f;
+        frame[frame_size++] = (current_state.tone_2 >> 4) & 0x3f;
     }
 
     /* Noise */
     if (current_state.noise != previous_state.noise)
     {
         frame[0] |= NOISE_BIT;
-        frame[frame_size++] = current_state.noise;
+        frame[frame_size++] = current_state.noise & 0x0f;
     }
 
     /* Volume 0/1 */
@@ -237,7 +237,8 @@ int write_frame (void)
         (current_state.volume_1 != previous_state.volume_1))
     {
         frame[0] |= VOLUME_0_1_BIT;
-        frame[frame_size++] = current_state.volume_0 | (current_state.volume_1 << 4);
+        frame[frame_size++] = (current_state.volume_0 & 0x0f) |
+                              (current_state.volume_1 << 4);
     }
 
     /* Volume 2/N */
@@ -245,30 +246,31 @@ int write_frame (void)
         (current_state.volume_3 != previous_state.volume_3))
     {
         frame[0] |= VOLUME_2_N_BIT;
-        frame[frame_size++] = current_state.volume_2 | (current_state.volume_3 << 4);
+        frame[frame_size++] = (current_state.volume_2 & 0x0f) |
+                              (current_state.volume_3 << 4);
     }
 
-    if (frame_delay > 3)
+    if (frame_delay > 4)
     {
         frame[0] |= 3 << 6;
-        frame_delay -= 3;
+        frame_delay -= 4;
     }
     else
     {
-        frame[0] |= frame_delay << 6;
+        frame[0] |= (frame_delay - 1) << 6;
         frame_delay = 0;
     }
 
     while (frame_delay != 0)
     {
-        if (frame_delay > 3)
+        if (frame_delay > 4)
         {
             frame[frame_size++] |= 3 << 6;
-            frame_delay -= 3;
+            frame_delay -= 4;
         }
         else
         {
-            frame[frame_size++] |= frame_delay << 6;
+            frame[frame_size++] |= (frame_delay - 1) << 6;
             frame_delay = 0;
         }
     }
@@ -295,7 +297,6 @@ int main (int argc, char **argv)
     uint8_t data = 0;
     uint16_t data_low = 0;
     uint16_t data_high = 0;
-    uint16_t data_volume = 0;
 
     if (argc != 2)
     {
@@ -344,8 +345,6 @@ int main (int argc, char **argv)
             data = buffer[++i];
             data_low  = data & 0x0f;
             data_high = data << 0x04;
-            /* Preprocess volume here to make things easier on the micro */
-            data_volume = 0x0f - data_low;
 
             if (data & 0x80) { /* Latch + data-low (4-bits) */
 
@@ -360,7 +359,7 @@ int main (int argc, char **argv)
                     break;
 
                 case 0x10:
-                    current_state.volume_0 = data_volume;
+                    current_state.volume_0 = data_low;
                     break;
 
                 /* Tone1 */
@@ -370,7 +369,7 @@ int main (int argc, char **argv)
                     break;
 
                 case 0x30:
-                    current_state.volume_1 = data_volume;
+                    current_state.volume_1 = data_low;
                     break;
 
                 /* Tone2 */
@@ -380,7 +379,7 @@ int main (int argc, char **argv)
                     break;
 
                 case 0x50:
-                    current_state.volume_2 = data_volume;
+                    current_state.volume_2 = data_low;
                     break;
 
                 /* Noise */
@@ -389,7 +388,7 @@ int main (int argc, char **argv)
                     break;
 
                 case 0x70:
-                    current_state.volume_3 = data_volume;
+                    current_state.volume_3 = data_low;
                     break;
                 }
             }
@@ -403,7 +402,7 @@ int main (int argc, char **argv)
                     break;
 
                 case 0x10:
-                    current_state.volume_0 = data_volume;
+                    current_state.volume_0 = data_low;
                     break;
 
                 /* Tone1 */
@@ -413,7 +412,7 @@ int main (int argc, char **argv)
                     break;
 
                 case 0x30:
-                    current_state.volume_1 = data_volume;
+                    current_state.volume_1 = data_low;
                     break;
 
                 /* Tone2 */
@@ -424,7 +423,7 @@ int main (int argc, char **argv)
                     break;
 
                 case 0x50:
-                    current_state.volume_2 = data_volume;
+                    current_state.volume_2 = data_low;
                     break;
 
                 /* Noise */
@@ -433,7 +432,7 @@ int main (int argc, char **argv)
                     break;
 
                 case 0x70:
-                    current_state.volume_3 = data_volume;
+                    current_state.volume_3 = data_low;
                     break;
                 }
             }
