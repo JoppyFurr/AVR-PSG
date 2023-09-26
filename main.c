@@ -121,6 +121,15 @@ void tick ()
 
 
 /*
+ * 60 Hz interrupt.
+ */
+ISR (TIMER1_COMPA_vect)
+{
+    tick ();
+}
+
+
+/*
  * Entry point.
  *
  * PortD = Data
@@ -151,15 +160,17 @@ int main (void)
     psg_write (0x80 | 0x5f); /* Mute Tone2 */
     psg_write (0x80 | 0x7f); /* Mute Noise */
 
-#if 0
-    /* TODO: Set up 60 Hz interrupt */
+    /* Use timer 1 to generate a 60 Hz interrupt */
+    TCCR1A = 0;
+    TCCR1B = (1 << WGM12) | (1 << CS11); /* CTC mode, pre-scale clock by 8 */
+    OCR1A = 14914; /* Top value for counter, to give ~60 Hz */
+    TIMSK = (1 << OCIE1A); /* Interrupt on Output-compare-A match */
+
     /* Enable interrupts */
     sei ();
-#endif
 
     while (true)
     {
-        _delay_ms (16);
-        tick ();
+        _delay_ms (10);
     }
 }
