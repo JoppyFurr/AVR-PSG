@@ -52,65 +52,58 @@ void tick ()
         uint8_t frame = pgm_read_byte (&(music_data[index++]));
         uint8_t data;
 
-#if 0
-        /* End of data - Restart */
-        if (frame == 0x00)
+        /* Check for end of data and loop */
+        if (index == END_FRAME_INDEX)
         {
-            delay = 120;
-            index = 0;
+            index = LOOP_FRAME_INDEX;
         }
-        else
+
+        if (frame & TONE_0_BIT)
         {
-#endif
-            if (frame & TONE_0_BIT)
-            {
-                data = pgm_read_byte (&(music_data[index++]));
-                psg_write (0x80 | 0x00 | data);
+            data = pgm_read_byte (&(music_data[index++]));
+            psg_write (0x80 | 0x00 | data);
 
-                data = pgm_read_byte (&(music_data[index++]));
-                psg_write (data);
-            }
-            if (frame & TONE_1_BIT)
-            {
-                data = pgm_read_byte (&(music_data[index++]));
-                psg_write (0x80 | 0x20 | data);
-
-                data = pgm_read_byte (&(music_data[index++]));
-                psg_write (data);
-            }
-            if (frame & TONE_2_BIT)
-            {
-                data = pgm_read_byte (&(music_data[index++]));
-                psg_write (0x80 | 0x40 | data);
-
-                data = pgm_read_byte (&(music_data[index++]));
-                psg_write (data);
-            }
-            if (frame & NOISE_BIT)
-            {
-                data = pgm_read_byte (&(music_data[index++]));
-                psg_write (0x80 | 0x60 | data);
-            }
-            if (frame & VOLUME_0_1_BIT)
-            {
-                /* TODO: If we keep track of the volumes, then
-                 *       only the changed value needs to be sent. */
-                data = pgm_read_byte (&(music_data[index++]));
-                psg_write (0x80 | 0x10 | (data & 0x0f));
-                psg_write (0x80 | 0x30 | (data >> 4));
-            }
-            if (frame & VOLUME_2_N_BIT)
-            {
-                data = pgm_read_byte (&(music_data[index++]));
-                psg_write (0x80 | 0x50 | (data & 0x0f));
-                psg_write (0x80 | 0x70 | (data >> 4));
-            }
-
-            delay = (frame >> 6) + 1;
+            data = pgm_read_byte (&(music_data[index++]));
+            psg_write (data);
         }
-#if 0
+        if (frame & TONE_1_BIT)
+        {
+            data = pgm_read_byte (&(music_data[index++]));
+            psg_write (0x80 | 0x20 | data);
+
+            data = pgm_read_byte (&(music_data[index++]));
+            psg_write (data);
+        }
+        if (frame & TONE_2_BIT)
+        {
+            data = pgm_read_byte (&(music_data[index++]));
+            psg_write (0x80 | 0x40 | data);
+
+            data = pgm_read_byte (&(music_data[index++]));
+            psg_write (data);
+        }
+        if (frame & NOISE_BIT)
+        {
+            data = pgm_read_byte (&(music_data[index++]));
+            psg_write (0x80 | 0x60 | data);
+        }
+        if (frame & VOLUME_0_1_BIT)
+        {
+            /* TODO: If we keep track of the volumes, then
+             *       only the changed value needs to be sent. */
+            data = pgm_read_byte (&(music_data[index++]));
+            psg_write (0x80 | 0x10 | (data & 0x0f));
+            psg_write (0x80 | 0x30 | (data >> 4));
+        }
+        if (frame & VOLUME_2_N_BIT)
+        {
+            data = pgm_read_byte (&(music_data[index++]));
+            psg_write (0x80 | 0x50 | (data & 0x0f));
+            psg_write (0x80 | 0x70 | (data >> 4));
+        }
+
+        delay = (frame >> 6) + 1;
     }
-#endif
 
     /* Decrement the delay counter */
     if (delay > 0)

@@ -167,6 +167,7 @@ uint32_t samples_delay = 0;
 
 uint8_t  output[OUTPUT_SIZE_MAX + 6] = { 0 };
 uint32_t output_size = 0;
+uint32_t loop_frame_index = 0;
 
 /* TODO: For PAL music, perhaps define delay as multiples of 1/50, or have
  *       a shorter delay like 1/300 that can cleanly describy both PAL and
@@ -317,7 +318,16 @@ int main (int argc, char **argv)
     fprintf (stderr, "Rate: %d Hz.\n",       * (uint32_t *)(&buffer[0x24]));
     fprintf (stderr, "VGM offset: %02x.\n",  * (uint32_t *)(&buffer[0x34]));
 
-    /* TODO: For now, we're assuming a little-endian host */
+    uint32_t loop_offset = * (uint32_t *)(&buffer[0x1c]);
+    if (loop_offset != 0)
+    {
+        loop_offset += 0x1c; /* Offsets in the VGM header are relative to their own position in the file */
+    }
+
+    fprintf (stderr, "Loop offset: %02x.\n",  * (uint32_t *)(&buffer[0x1c]));
+
+
+    /* Note: We assume a little-endian host */
     if (* (uint32_t *)(&buffer[0x34]) != 0)
     {
         vgm_offset = 0x34 + * (uint32_t *)(&buffer[0x34]);
@@ -327,10 +337,15 @@ int main (int argc, char **argv)
         vgm_offset = 0x40;
     }
 
-    /* TODO: Support for repeating */
 
     for (uint32_t i = vgm_offset; (i < SOURCE_SIZE_MAX) && (output_size < OUTPUT_SIZE_MAX); i++)
     {
+        if (i == loop_offset)
+        {
+            fprintf (stderr, "Loop frame index: %d.\n",  output_size);
+            loop_frame_index = output_size;
+        }
+
         switch (buffer[i])
         {
         case 0x4f:
@@ -465,12 +480,15 @@ int main (int argc, char **argv)
             break;
 
         default:
-            fprintf (stderr, "Unknow command %02x.\n", buffer[i]);
+            fprintf (stderr, "Unknown command %02x.\n", buffer[i]);
             break;
         }
     }
 
     output [output_size++] = 0; /* Null terminator */
+
+    printf ("#define LOOP_FRAME_INDEX %d\n", loop_frame_index);
+    printf ("#define END_FRAME_INDEX %d\n\n", output_size);
 
     printf ("const uint8_t music_data [] PROGMEM = {\n");
     for (int i = 0; i < output_size; i++)
