@@ -7,8 +7,8 @@
 const uint8_t  vgm_magic[4] = { 'V', 'g', 'm', ' ' };
 const uint8_t gzip_magic[3] = { 0x1f, 0x8b, 0x08 };
 
-#define SOURCE_SIZE_MAX 524288
-#define OUTPUT_SIZE_MAX 32000
+#define SOURCE_SIZE_MAX 524288      /* 512 KiB */
+#define OUTPUT_SIZE_MAX  32768      /*  32 KiB */
 
 uint8_t *read_vgz (char *filename)
 {
@@ -165,7 +165,7 @@ typedef struct psg_regs_s
 psg_regs current_state = { 0 };
 uint32_t samples_delay = 0;
 
-uint8_t  output[OUTPUT_SIZE_MAX + 6] = { 0 };
+uint8_t  output[OUTPUT_SIZE_MAX + 10] = { 0 };
 uint32_t output_size = 0;
 uint32_t loop_frame_index = 0;
 
@@ -483,6 +483,12 @@ int main (int argc, char **argv)
             fprintf (stderr, "Unknown command %02x.\n", buffer[i]);
             break;
         }
+    }
+
+    if (output_size >= (8192 - 640))
+    {
+        fprintf (stderr, "Warning: Output size %d.%02d KiB may not fit on ATMEGA-8.\n",
+                 output_size / 1024, (output_size % 1024) * 100 / 1024);
     }
 
     output [output_size++] = 0; /* Null terminator */
