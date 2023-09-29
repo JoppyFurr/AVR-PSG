@@ -4,8 +4,8 @@
 #include <string.h>
 #include <zlib.h>
 
-const uint8_t  vgm_magic[4] = { 'V', 'g', 'm', ' ' };
-const uint8_t gzip_magic[3] = { 0x1f, 0x8b, 0x08 };
+const uint8_t  vgm_magic [4] = { 'V', 'g', 'm', ' ' };
+const uint8_t gzip_magic [3] = { 0x1f, 0x8b, 0x08 };
 
 #define SOURCE_SIZE_MAX 524288      /* 512 KiB */
 #define OUTPUT_SIZE_MAX  32768      /*  32 KiB */
@@ -13,8 +13,8 @@ const uint8_t gzip_magic[3] = { 0x1f, 0x8b, 0x08 };
 uint8_t *read_vgz (char *filename)
 {
     gzFile source_vgz = NULL;
-    uint8_t file_magic[4] = { 0 };
-    uint8_t scratch[128] = { 0 };
+    uint8_t file_magic [4] = { 0 };
+    uint8_t scratch [128] = { 0 };
     uint8_t *buffer = NULL;
     uint32_t filesize = 0;
 
@@ -74,7 +74,7 @@ uint8_t *read_vgz (char *filename)
 uint8_t *read_vgm (char *filename)
 {
     FILE *source_vgm = NULL;
-    uint8_t file_magic[4] = { 0 };
+    uint8_t file_magic [4] = { 0 };
     uint8_t *buffer = NULL;
     uint32_t filesize = 0;
 
@@ -165,7 +165,7 @@ typedef struct psg_regs_s
 psg_regs current_state = { 0 };
 uint32_t samples_delay = 0;
 
-uint8_t  output[OUTPUT_SIZE_MAX + 10] = { 0 };
+uint8_t  output [OUTPUT_SIZE_MAX + 10] = { 0 };
 uint32_t output_size = 0;
 uint32_t loop_frame_index = 0;
 
@@ -175,8 +175,13 @@ uint32_t loop_frame_index = 0;
 int write_frame (void)
 {
     static psg_regs previous_state;
-    uint8_t frame[32] = { 0 };
+
+    uint8_t frame [32] = { 0 };
     uint8_t frame_size = 1;
+
+    uint8_t nibble [16] = { 0 };
+    uint8_t nibble_count = 0;
+
     uint16_t frame_delay = samples_delay / 735;
 
     samples_delay -= frame_delay * 735;
@@ -185,13 +190,17 @@ int write_frame (void)
      *
      *  Bitfields: ddvv nttt
      *
-     *  nttt -> 0001: Tone0 byte follows
-     *          0010: Tone1 byte follows
-     *          0100: Tone2 byte follows
-     *          1000: Noise byte follows
+     *  nttt -> 0001: Tone0 nibbles follow (3)
+     *          0010: Tone1 nibbles follow (3)
+     *          0100: Tone2 nibbles follow (3)
+     *          1000: Noise nibble follows
      *
-     *  vv   ->   01: Tone0 and Tone1 volume change follows
-     *       ->   10: Tone2 and Noise volume change follows
+     *          Nibbles are packed least-significant nibble first.
+     *          Within an output bytes, the least-significant nibble comes first.
+     *
+     *
+     *  vv   ->   01: Tone0 and Tone1 nibbles follow
+     *       ->   10: Tone2 and Noise nibbles follow
      *
      *  dd   ->   00: 1/60s delay after this data frame
      *            01: 2/60s delay after this data frame
@@ -205,52 +214,78 @@ int write_frame (void)
     /* Tone0 */
     if (current_state.tone_0 != previous_state.tone_0)
     {
-        frame[0] |= TONE_0_BIT;
-        frame[frame_size++] = current_state.tone_0        & 0x0f;
-        frame[frame_size++] = (current_state.tone_0 >> 4) & 0x3f;
+        frame [0] |= TONE_0_BIT;
+        nibble [nibble_count++] = (current_state.tone_0 & 0x00f);
+        nibble [nibble_count++] = (current_state.tone_0 & 0x0f0) >> 4;
+        nibble [nibble_count++] = (current_state.tone_0 & 0x300) >> 8;
     }
 
     /* Tone1 */
     if (current_state.tone_1 != previous_state.tone_1)
     {
-        frame[0] |= TONE_1_BIT;
-        frame[frame_size++] = current_state.tone_1        & 0x0f;
-        frame[frame_size++] = (current_state.tone_1 >> 4) & 0x3f;
+        frame [0] |= TONE_1_BIT;
+        nibble [nibble_count++] = (current_state.tone_1 & 0x00f);
+        nibble [nibble_count++] = (current_state.tone_1 & 0x0f0) >> 4;
+        nibble [nibble_count++] = (current_state.tone_1 & 0x300) >> 8;
     }
 
     /* Tone2 */
     if (current_state.tone_2 != previous_state.tone_2)
     {
-        frame[0] |= TONE_2_BIT;
-        frame[frame_size++] = current_state.tone_2        & 0x0f;
-        frame[frame_size++] = (current_state.tone_2 >> 4) & 0x3f;
+        frame [0] |= TONE_2_BIT;
+        nibble [nibble_count++] = (current_state.tone_2 & 0x00f);
+        nibble [nibble_count++] = (current_state.tone_2 & 0x0f0) >> 4;
+        nibble [nibble_count++] = (current_state.tone_2 & 0x300) >> 8;
     }
 
     /* Noise */
     if (current_state.noise != previous_state.noise)
     {
-        frame[0] |= NOISE_BIT;
-        frame[frame_size++] = current_state.noise & 0x0f;
+        frame [0] |= NOISE_BIT;
+        nibble [nibble_count++] = current_state.noise & 0x0f;
     }
 
     /* Volume 0/1 */
     if ((current_state.volume_0 != previous_state.volume_0) ||
         (current_state.volume_1 != previous_state.volume_1))
     {
-        frame[0] |= VOLUME_0_1_BIT;
-        frame[frame_size++] = (current_state.volume_0 & 0x0f) |
-                              (current_state.volume_1 << 4);
+        frame [0] |= VOLUME_0_1_BIT;
+        nibble [nibble_count++] = current_state.volume_0 & 0x0f;
+        nibble [nibble_count++] = current_state.volume_1 & 0x0f;
     }
 
     /* Volume 2/N */
     if ((current_state.volume_2 != previous_state.volume_2) ||
         (current_state.volume_3 != previous_state.volume_3))
     {
-        frame[0] |= VOLUME_2_N_BIT;
-        frame[frame_size++] = (current_state.volume_2 & 0x0f) |
-                              (current_state.volume_3 << 4);
+        frame [0] |= VOLUME_2_N_BIT;
+        nibble [nibble_count++] = current_state.volume_2 & 0x0f;
+        nibble [nibble_count++] = current_state.volume_3 & 0x0f;
     }
 
+    /* Pack nibbles */
+    /* TODO: Use C bitfields */
+    for (int i = 0; i < nibble_count; i++)
+    {
+        if (i % 2 == 0)
+        {
+            /* Low nibble */
+            frame [frame_size] = (nibble [i] & 0x0f);
+        }
+        else
+        {
+            /* High nibble */
+            frame [frame_size++] |= (nibble [i] & 0x0f) << 4;
+        }
+    }
+
+    /* If we have an odd number of nibbles, remember to increment the frame size */
+    if (nibble_count % 2 == 1)
+    {
+        frame_size++;
+    }
+
+    /* Delay built into the initial header */
     if (frame_delay > 4)
     {
         frame[0] |= 3 << 6;
@@ -262,6 +297,7 @@ int write_frame (void)
         frame_delay = 0;
     }
 
+    /* Additional frame headers when greater than 4/60s delay is needed */
     while (frame_delay != 0)
     {
         if (frame_delay > 4)
@@ -276,6 +312,7 @@ int write_frame (void)
         }
     }
 
+    /* Add the new frame(s) to the output buffer */
     for (int i = 0; i < frame_size; i++)
     {
         output [output_size++] = frame[i];
@@ -289,7 +326,7 @@ int write_frame (void)
 int main (int argc, char **argv)
 {
     /* File I/O */
-    char *filename = argv[1];
+    char *filename = argv [1];
     uint8_t *buffer = NULL;
     uint32_t vgm_offset = 0;
 
@@ -313,24 +350,24 @@ int main (int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    fprintf (stderr, "Version: %x.\n",       * (uint32_t *)(&buffer[0x08]));
-    fprintf (stderr, "Clock rate: %d Hz.\n", * (uint32_t *)(&buffer[0x0c]));
-    fprintf (stderr, "Rate: %d Hz.\n",       * (uint32_t *)(&buffer[0x24]));
-    fprintf (stderr, "VGM offset: %02x.\n",  * (uint32_t *)(&buffer[0x34]));
+    fprintf (stderr, "Version: %x.\n",       * (uint32_t *)(&buffer [0x08]));
+    fprintf (stderr, "Clock rate: %d Hz.\n", * (uint32_t *)(&buffer [0x0c]));
+    fprintf (stderr, "Rate: %d Hz.\n",       * (uint32_t *)(&buffer [0x24]));
+    fprintf (stderr, "VGM offset: %02x.\n",  * (uint32_t *)(&buffer [0x34]));
 
-    uint32_t loop_offset = * (uint32_t *)(&buffer[0x1c]);
+    uint32_t loop_offset = * (uint32_t *)(&buffer [0x1c]);
     if (loop_offset != 0)
     {
         loop_offset += 0x1c; /* Offsets in the VGM header are relative to their own position in the file */
     }
 
-    fprintf (stderr, "Loop offset: %02x.\n",  * (uint32_t *)(&buffer[0x1c]));
+    fprintf (stderr, "Loop offset: %02x.\n",  * (uint32_t *)(&buffer [0x1c]));
 
 
     /* Note: We assume a little-endian host */
-    if (* (uint32_t *)(&buffer[0x34]) != 0)
+    if (* (uint32_t *)(&buffer [0x34]) != 0)
     {
-        vgm_offset = 0x34 + * (uint32_t *)(&buffer[0x34]);
+        vgm_offset = 0x34 + * (uint32_t *)(&buffer [0x34]);
     }
     else
     {
@@ -454,7 +491,7 @@ int main (int argc, char **argv)
             break;
 
         case 0x61: /* Wait n 44.1 KHz samples */
-            samples_delay += * (uint16_t *)(&buffer[i+1]);
+            samples_delay += * (uint16_t *)(&buffer [i+1]);
             i += 2;
             break;
 
@@ -476,11 +513,11 @@ int main (int argc, char **argv)
         case 0x74: case 0x75: case 0x76: case 0x77:
         case 0x78: case 0x79: case 0x7a: case 0x7b:
         case 0x7c: case 0x7d: case 0x7e: case 0x7f:
-            samples_delay += 1 + (buffer[i] & 0x0f);
+            samples_delay += 1 + (buffer [i] & 0x0f);
             break;
 
         default:
-            fprintf (stderr, "Unknown command %02x.\n", buffer[i]);
+            fprintf (stderr, "Unknown command %02x.\n", buffer [i]);
             break;
         }
     }

@@ -21,7 +21,9 @@
 #include "louie_louie.h"
 // #include "sky_high.h"
 
-void psg_write (uint8_t data)
+static uint16_t data_index = 0;
+
+static void psg_write (uint8_t data)
 {
     uint8_t port_b;
 
@@ -41,68 +43,107 @@ void psg_write (uint8_t data)
     PORTB |= 0x01;
 }
 
-void tick ()
+
+/* Flag for 'is the next nibble to the high nibble of its byte?' */
+static bool nibble_high = false;
+
+static uint8_t nibble_read ()
+{
+    if (nibble_high)
+    {
+        nibble_high = false;
+        return  pgm_read_byte (&(music_data[data_index++])) >> 4;
+    }
+    else
+    {
+        nibble_high = true;
+        return  pgm_read_byte (&(music_data[data_index])) & 0x0f;
+    }
+}
+
+
+/* Advance the index if we end half way through a byte */
+static void nibble_done ()
+{
+    if (nibble_high)
+    {
+        nibble_high = false;
+        data_index++;
+    }
+}
+
+
+/*
+ *
+ */
+static void tick ()
 {
     static uint8_t delay = 0;
-    static uint16_t index = 0;
 
     /* Read and process the next frame */
     if (delay == 0)
     {
-        uint8_t frame = pgm_read_byte (&(music_data[index++]));
+        uint8_t frame = pgm_read_byte (&(music_data[data_index++]));
         uint8_t data;
-
-        /* Check for end of data and loop */
-        if (index == END_FRAME_INDEX)
-        {
-            index = LOOP_FRAME_INDEX;
-        }
 
         if (frame & TONE_0_BIT)
         {
-            data = pgm_read_byte (&(music_data[index++]));
+            data = nibble_read ();
             psg_write (0x80 | 0x00 | data);
 
-            data = pgm_read_byte (&(music_data[index++]));
+            data = nibble_read ();
+            data |= nibble_read () << 4;
             psg_write (data);
         }
         if (frame & TONE_1_BIT)
         {
-            data = pgm_read_byte (&(music_data[index++]));
+            data = nibble_read ();
             psg_write (0x80 | 0x20 | data);
 
-            data = pgm_read_byte (&(music_data[index++]));
+            data = nibble_read ();
+            data |= nibble_read () << 4;
             psg_write (data);
         }
         if (frame & TONE_2_BIT)
         {
-            data = pgm_read_byte (&(music_data[index++]));
+            data = nibble_read ();
             psg_write (0x80 | 0x40 | data);
 
-            data = pgm_read_byte (&(music_data[index++]));
+            data = nibble_read ();
+            data |= nibble_read () << 4;
             psg_write (data);
         }
         if (frame & NOISE_BIT)
         {
-            data = pgm_read_byte (&(music_data[index++]));
+            data = nibble_read ();
             psg_write (0x80 | 0x60 | data);
         }
         if (frame & VOLUME_0_1_BIT)
         {
             /* TODO: If we keep track of the volumes, then
              *       only the changed value needs to be sent. */
-            data = pgm_read_byte (&(music_data[index++]));
-            psg_write (0x80 | 0x10 | (data & 0x0f));
-            psg_write (0x80 | 0x30 | (data >> 4));
+            data = nibble_read ();
+            psg_write (0x80 | 0x10 | data);
+            data = nibble_read ();
+            psg_write (0x80 | 0x30 | data);
         }
         if (frame & VOLUME_2_N_BIT)
         {
-            data = pgm_read_byte (&(music_data[index++]));
-            psg_write (0x80 | 0x50 | (data & 0x0f));
-            psg_write (0x80 | 0x70 | (data >> 4));
+            data = nibble_read ();
+            psg_write (0x80 | 0x50 | data);
+            data = nibble_read ();
+            psg_write (0x80 | 0x70 | data);
         }
 
+        nibble_done ();
+
         delay = (frame >> 6) + 1;
+    }
+
+    /* Check for end of data and loop */
+    if (data_index == END_FRAME_INDEX)
+    {
+        data_index = LOOP_FRAME_INDEX;
     }
 
     /* Decrement the delay counter */
