@@ -10,19 +10,28 @@
 #include <avr/pgmspace.h>
 #include <util/delay.h>
 
+#define TONE_0_BIT      0x01
+#define TONE_1_BIT      0x02
+#define TONE_2_BIT      0x04
+#define NOISE_BIT       0x08
+#define VOLUME_0_BIT    0x10
+#define VOLUME_1_BIT    0x20
+#define VOLUME_2_BIT    0x40
+#define VOLUME_3_BIT    0x80
 
-#define TONE_0_BIT     0x01
-#define TONE_1_BIT     0x02
-#define TONE_2_BIT     0x04
-#define NOISE_BIT      0x08
-#define VOLUME_0_1_BIT 0x10
-#define VOLUME_2_N_BIT 0x20
+// #include "bridge_zone.h"
+// #include "chocolate.h"
+// #include "louie_louie.h"
+#include "sky_high.h"
+// #include "tiny_cavern.h"
 
-#include "louie_louie.h"
-// #include "sky_high.h"
+static uint16_t frame_index = 0;
+static uint16_t index_index = 0;
 
-static uint16_t data_index = 0;
 
+/*
+ * Write one byte of data to the sn76489.
+ */
 static void psg_write (uint8_t data)
 {
     uint8_t port_b;
@@ -47,34 +56,39 @@ static void psg_write (uint8_t data)
 /* Flag for 'is the next nibble to the high nibble of its byte?' */
 static bool nibble_high = false;
 
+/*
+ * Read the next nibble from the frame data.
+ */
 static uint8_t nibble_read ()
 {
     if (nibble_high)
     {
         nibble_high = false;
-        return  pgm_read_byte (&(music_data[data_index++])) >> 4;
+        return  pgm_read_byte (&(frame_data[frame_index++])) >> 4;
     }
     else
     {
         nibble_high = true;
-        return  pgm_read_byte (&(music_data[data_index])) & 0x0f;
-    }
-}
-
-
-/* Advance the index if we end half way through a byte */
-static void nibble_done ()
-{
-    if (nibble_high)
-    {
-        nibble_high = false;
-        data_index++;
+        return  pgm_read_byte (&(frame_data[frame_index])) & 0x0f;
     }
 }
 
 
 /*
- *
+ * Advance the index if we end half way through a byte.
+ */
+static void nibble_done ()
+{
+    if (nibble_high)
+    {
+        nibble_high = false;
+        frame_index++;
+    }
+}
+
+
+/*
+ * Called every 1/60s to apply the next set of register writes.
  */
 static void tick ()
 {
@@ -83,8 +97,16 @@ static void tick ()
     /* Read and process the next frame */
     if (delay == 0)
     {
-        uint8_t frame = pgm_read_byte (&(music_data[data_index++]));
+        uint8_t frame;
         uint8_t data;
+
+        /* Read the delay and frame_index from the index_data */
+        frame_index = pgm_read_word (&(index_data[index_index++]));
+        delay = (frame_index >> 12) + 1;
+        frame_index &= 0x0fff;
+
+        /* Read the frame header from the frame_data */
+        frame = pgm_read_byte (&(frame_data[frame_index++]));
 
         if (frame & TONE_0_BIT)
         {
@@ -118,32 +140,34 @@ static void tick ()
             data = nibble_read ();
             psg_write (0x80 | 0x60 | data);
         }
-        if (frame & VOLUME_0_1_BIT)
+        if (frame & VOLUME_0_BIT)
         {
-            /* TODO: If we keep track of the volumes, then
-             *       only the changed value needs to be sent. */
             data = nibble_read ();
             psg_write (0x80 | 0x10 | data);
+        }
+        if (frame & VOLUME_1_BIT)
+        {
             data = nibble_read ();
             psg_write (0x80 | 0x30 | data);
         }
-        if (frame & VOLUME_2_N_BIT)
+        if (frame & VOLUME_2_BIT)
         {
             data = nibble_read ();
             psg_write (0x80 | 0x50 | data);
+        }
+        if (frame & VOLUME_3_BIT)
+        {
             data = nibble_read ();
             psg_write (0x80 | 0x70 | data);
         }
 
         nibble_done ();
-
-        delay = (frame >> 6) + 1;
     }
 
     /* Check for end of data and loop */
-    if (data_index == END_FRAME_INDEX)
+    if (index_index == END_FRAME_INDEX)
     {
-        data_index = LOOP_FRAME_INDEX;
+        index_index = LOOP_FRAME_INDEX;
     }
 
     /* Decrement the delay counter */
@@ -189,6 +213,7 @@ int main (void)
     DDRD = 0xff;
     PORTD = 0;
 
+    /* Default register values */
     psg_write (0x80 | 0x3f); /* Mute Tone0 */
     psg_write (0x80 | 0x3f); /* Mute Tone1 */
     psg_write (0x80 | 0x5f); /* Mute Tone2 */

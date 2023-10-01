@@ -153,42 +153,63 @@ typedef struct psg_regs_s
     uint8_t volume_3;
 } psg_regs;
 
-#define TONE_0_BIT     0x01
-#define TONE_1_BIT     0x02
-#define TONE_2_BIT     0x04
-#define NOISE_BIT      0x08
-#define VOLUME_0_1_BIT 0x10
-#define VOLUME_2_N_BIT 0x20
+#define TONE_0_BIT      0x01
+#define TONE_1_BIT      0x02
+#define TONE_2_BIT      0x04
+#define NOISE_BIT       0x08
+#define VOLUME_0_BIT    0x10
+#define VOLUME_1_BIT    0x20
+#define VOLUME_2_BIT    0x40
+#define VOLUME_3_BIT    0x80
 
 /* State tracking */
-/* OwO - notices your globals */
-psg_regs current_state = { 0 };
-uint32_t samples_delay = 0;
+static psg_regs current_state = { 0 };
+static uint32_t samples_delay = 0;
 
-uint8_t  output [OUTPUT_SIZE_MAX + 10] = { 0 };
-uint32_t output_size = 0;
-uint32_t loop_frame_index = 0;
+/* Unique frames. Note that:
+ *  1. Frames are variable length.
+ *  2. A zero-frame is pre-populated at the start for use with delay-only indexes. */
+static uint8_t  frame_data [OUTPUT_SIZE_MAX + 10] = { 0 };
+static uint32_t frame_data_size = 1;
+
+/* Index of each unique frame to speed up matching. */
+static uint16_t frame_indexes [OUTPUT_SIZE_MAX + 10] = { 0 };
+static uint16_t frame_count = 1;
+
+/* Indexes into frame data to be used for playback. */
+/* Note: two bytes per index is pretty big, we probably need ~12 bits.
+ *       Consider:
+ *        - nibble-packing.
+ *        - Storing delay in the extra bits. */
+static uint16_t index_data [OUTPUT_SIZE_MAX + 10] = { 0 };
+static uint16_t index_data_count = 0;
+static uint16_t loop_frame_index = 0;
+
+#define TOTAL_SIZE (frame_data_size + index_data_count * 2)
+
+/* Holding space for newly generated frame */
+#define FRAME_SIZE_MAX 8
+static uint8_t new_frame [FRAME_SIZE_MAX] = { 0 };
 
 /* TODO: For PAL music, perhaps define delay as multiples of 1/50, or have
- *       a shorter delay like 1/300 that can cleanly describy both PAL and
+ *       a shorter delay like 1/300 that can cleanly describe both PAL and
  *       NTSC timings. */
-int write_frame (void)
+
+uint16_t generate_frame (void)
 {
     static psg_regs previous_state;
 
-    uint8_t frame [32] = { 0 };
     uint8_t frame_size = 1;
 
     uint8_t nibble [16] = { 0 };
     uint8_t nibble_count = 0;
 
-    uint16_t frame_delay = samples_delay / 735;
-
-    samples_delay -= frame_delay * 735;
+    /* Clear all bits for the new frame */
+    memset (new_frame, 0, sizeof (new_frame));
 
     /* Frame format description:
      *
-     *  Bitfields: ddvv nttt
+     *  Bitfields: vvvv nttt
      *
      *  nttt -> 0001: Tone0 nibbles follow (3)
      *          0010: Tone1 nibbles follow (3)
@@ -199,13 +220,10 @@ int write_frame (void)
      *          Within an output bytes, the least-significant nibble comes first.
      *
      *
-     *  vv   ->   01: Tone0 and Tone1 nibbles follow
-     *       ->   10: Tone2 and Noise nibbles follow
-     *
-     *  dd   ->   00: 1/60s delay after this data frame
-     *            01: 2/60s delay after this data frame
-     *            10: 3/60s delay after this data frame
-     *            11: 4/60s delay after this data frame
+     *  vvvv -> 0001: Tone0 volume nibble follows
+     *       -> 0010: Tone1 volume nibble follows
+     *       -> 0100: Tone2 volume nibble follows
+     *       -> 1000: Noise volume nibble follows
      *
      *  Bytes follow in the order they appear in the above list.
      *  Two bytes for the 10-bit tone registers.
@@ -214,7 +232,7 @@ int write_frame (void)
     /* Tone0 */
     if (current_state.tone_0 != previous_state.tone_0)
     {
-        frame [0] |= TONE_0_BIT;
+        new_frame [0] |= TONE_0_BIT;
         nibble [nibble_count++] = (current_state.tone_0 & 0x00f);
         nibble [nibble_count++] = (current_state.tone_0 & 0x0f0) >> 4;
         nibble [nibble_count++] = (current_state.tone_0 & 0x300) >> 8;
@@ -223,7 +241,7 @@ int write_frame (void)
     /* Tone1 */
     if (current_state.tone_1 != previous_state.tone_1)
     {
-        frame [0] |= TONE_1_BIT;
+        new_frame [0] |= TONE_1_BIT;
         nibble [nibble_count++] = (current_state.tone_1 & 0x00f);
         nibble [nibble_count++] = (current_state.tone_1 & 0x0f0) >> 4;
         nibble [nibble_count++] = (current_state.tone_1 & 0x300) >> 8;
@@ -232,7 +250,7 @@ int write_frame (void)
     /* Tone2 */
     if (current_state.tone_2 != previous_state.tone_2)
     {
-        frame [0] |= TONE_2_BIT;
+        new_frame [0] |= TONE_2_BIT;
         nibble [nibble_count++] = (current_state.tone_2 & 0x00f);
         nibble [nibble_count++] = (current_state.tone_2 & 0x0f0) >> 4;
         nibble [nibble_count++] = (current_state.tone_2 & 0x300) >> 8;
@@ -241,25 +259,35 @@ int write_frame (void)
     /* Noise */
     if (current_state.noise != previous_state.noise)
     {
-        frame [0] |= NOISE_BIT;
+        new_frame [0] |= NOISE_BIT;
         nibble [nibble_count++] = current_state.noise & 0x0f;
     }
 
-    /* Volume 0/1 */
-    if ((current_state.volume_0 != previous_state.volume_0) ||
-        (current_state.volume_1 != previous_state.volume_1))
+    /* Volume 0 */
+    if (current_state.volume_0 != previous_state.volume_0)
     {
-        frame [0] |= VOLUME_0_1_BIT;
+        new_frame [0] |= VOLUME_0_BIT;
         nibble [nibble_count++] = current_state.volume_0 & 0x0f;
+    }
+
+    /* Volume 1 */
+    if (current_state.volume_1 != previous_state.volume_1)
+    {
+        new_frame [0] |= VOLUME_1_BIT;
         nibble [nibble_count++] = current_state.volume_1 & 0x0f;
     }
 
-    /* Volume 2/N */
-    if ((current_state.volume_2 != previous_state.volume_2) ||
-        (current_state.volume_3 != previous_state.volume_3))
+    /* Volume 2 */
+    if (current_state.volume_2 != previous_state.volume_2)
     {
-        frame [0] |= VOLUME_2_N_BIT;
+        new_frame [0] |= VOLUME_2_BIT;
         nibble [nibble_count++] = current_state.volume_2 & 0x0f;
+    }
+
+    /* Volume 3 */
+    if (current_state.volume_3 != previous_state.volume_3)
+    {
+        new_frame [0] |= VOLUME_3_BIT;
         nibble [nibble_count++] = current_state.volume_3 & 0x0f;
     }
 
@@ -270,12 +298,12 @@ int write_frame (void)
         if (i % 2 == 0)
         {
             /* Low nibble */
-            frame [frame_size] = (nibble [i] & 0x0f);
+            new_frame [frame_size] = (nibble [i] & 0x0f);
         }
         else
         {
             /* High nibble */
-            frame [frame_size++] |= (nibble [i] & 0x0f) << 4;
+            new_frame [frame_size++] |= (nibble [i] & 0x0f) << 4;
         }
     }
 
@@ -285,42 +313,87 @@ int write_frame (void)
         frame_size++;
     }
 
-    /* Delay built into the initial header */
-    if (frame_delay > 4)
-    {
-        frame[0] |= 3 << 6;
-        frame_delay -= 4;
-    }
-    else
-    {
-        frame[0] |= (frame_delay - 1) << 6;
-        frame_delay = 0;
-    }
-
-    /* Additional frame headers when greater than 4/60s delay is needed */
-    while (frame_delay != 0)
-    {
-        if (frame_delay > 4)
-        {
-            frame[frame_size++] |= 3 << 6;
-            frame_delay -= 4;
-        }
-        else
-        {
-            frame[frame_size++] |= (frame_delay - 1) << 6;
-            frame_delay = 0;
-        }
-    }
-
-    /* Add the new frame(s) to the output buffer */
-    for (int i = 0; i < frame_size; i++)
-    {
-        output [output_size++] = frame[i];
-    }
-
     memcpy (&previous_state, &current_state, sizeof (psg_regs));
 
     return frame_size;
+}
+
+
+/*
+ * Adds a frame to the output buffers.
+ *
+ * If the frame is new, it is added both to frame_data and index_data.
+ * If the frame is a duplicate, it is only added to index_data.
+ */
+void write_frame (void)
+{
+    uint16_t index = 0xffff;
+    uint16_t new_frame_size = generate_frame ();
+    uint16_t frame_delay = samples_delay / 735;
+    samples_delay -= frame_delay * 735;
+
+    /* Check if the frame already exists */
+    for (int i = 0; i < frame_count; i++)
+    {
+        if (memcmp (new_frame, &(frame_data [frame_indexes [i]]), new_frame_size) == 0)
+        {
+            /* Found - Output the index and return */
+            /* TODO: Extra delays will be lost, so should be handled here
+             *       instead of emitted by generate_frame. Remember to use
+             *       0000 for 1/60, as 0/60 shouldn't happen.
+             *       Also consider a different split, such as 3.13 instead
+             *       of 4.12 if we need >4K of unique frames.
+             *       */
+            index = frame_indexes [i];
+            break;
+        }
+    }
+
+    /* If a matching index was not found, then this is a new unique frame. */
+    if (index == 0xffff)
+    {
+        /* Check there is space for a new frame, as we use 12 bits to index them */
+        if (frame_data_size >= 0x0fff)
+        {
+            fprintf (stderr, "Warning: frame_data too large to index.\n");
+        }
+
+        index = frame_data_size;
+        frame_indexes [frame_count++] = index;
+
+        /* Add the new frame to the frame_data buffer */
+        for (int i = 0; i < new_frame_size; i++)
+        {
+            frame_data [frame_data_size++] = new_frame[i];
+        }
+    }
+
+    if (frame_delay <= 16)
+    {
+        uint16_t delay_bits = (frame_delay - 1) << 12;
+        index_data [index_data_count++] = delay_bits | index;
+    }
+    else
+    {
+        /* More than 16/60s delay requires multiple indexes */
+        index_data [index_data_count++] = 0xf000 | index;
+        frame_delay -= 16;
+
+        while (frame_delay)
+        {
+            if (frame_delay <= 16)
+            {
+                uint16_t delay_bits = (frame_delay - 1) << 12;
+                index_data [index_data_count++] = delay_bits;
+                frame_delay = 0;
+            }
+            else
+            {
+                index_data [index_data_count++] = 0xf000;
+                frame_delay -= 16;
+            }
+        }
+    }
 }
 
 int main (int argc, char **argv)
@@ -375,12 +448,12 @@ int main (int argc, char **argv)
     }
 
 
-    for (uint32_t i = vgm_offset; (i < SOURCE_SIZE_MAX) && (output_size < OUTPUT_SIZE_MAX); i++)
+    for (uint32_t i = vgm_offset; (i < SOURCE_SIZE_MAX) && (TOTAL_SIZE < OUTPUT_SIZE_MAX); i++)
     {
         if (i == loop_offset)
         {
-            fprintf (stderr, "Loop frame index: %d.\n",  output_size);
-            loop_frame_index = output_size;
+            loop_frame_index = index_data_count;
+            fprintf (stderr, "Loop frame index: %d.\n", loop_frame_index);
         }
 
         switch (buffer[i])
@@ -522,26 +595,24 @@ int main (int argc, char **argv)
         }
     }
 
-    if (output_size >= (8192 - 640))
+    if (TOTAL_SIZE >= (8192 - 640))
     {
         fprintf (stderr, "Warning: Output size %d.%02d KiB may not fit on ATMEGA-8.\n",
-                 output_size / 1024, (output_size % 1024) * 100 / 1024);
+                 TOTAL_SIZE / 1024, (TOTAL_SIZE % 1024) * 100 / 1024);
     }
 
-    output [output_size++] = 0; /* Null terminator */
-
     printf ("#define LOOP_FRAME_INDEX %d\n", loop_frame_index);
-    printf ("#define END_FRAME_INDEX %d\n\n", output_size);
+    printf ("#define END_FRAME_INDEX %d\n\n", index_data_count);
 
-    printf ("const uint8_t music_data [] PROGMEM = {\n");
-    for (int i = 0; i < output_size; i++)
+    printf ("const uint8_t frame_data [] PROGMEM = {\n");
+    for (int i = 0; i < frame_data_size; i++)
     {
         if (i % 16 == 0)
         {
             printf ("    ");
         }
-        printf ("0x%02x%s", output [i], i == (output_size - 1) ? "\n" : ",");
-        if (i == (output_size - 1))
+        printf ("0x%02x%s", frame_data [i], i == (frame_data_size - 1) ? "\n" : ",");
+        if (i == (frame_data_size - 1))
         {
             break;
         }
@@ -554,9 +625,35 @@ int main (int argc, char **argv)
             printf (" ");
         }
     }
+    printf ("};\n\n");
+
+    printf ("const uint16_t index_data [] PROGMEM = {\n");
+    for (int i = 0; i < index_data_count; i++)
+    {
+        if (i % 8 == 0)
+        {
+            printf ("    ");
+        }
+        printf ("0x%04x%s", index_data [i], i == (index_data_count - 1) ? "\n" : ",");
+        if (i == (index_data_count - 1))
+        {
+            break;
+        }
+        if (i % 8 == 7)
+        {
+            printf ("\n");
+        }
+        else
+        {
+            printf (" ");
+        }
+    }
     printf ("};\n");
 
-    fprintf (stderr, "Done. %d bytes output.\n", output_size);
+    fprintf (stderr, "Done.\n");
+    fprintf (stderr, " - %d bytes of frame data. (%d unique frames)\n", frame_data_size, frame_count);
+    fprintf (stderr, " - %d bytes of index data.\n", index_data_count * 2);
+    fprintf (stderr, " - %d bytes total.\n", TOTAL_SIZE);
 
     free (buffer);
 }
