@@ -25,8 +25,9 @@
 #include "sky_high.h"
 // #include "tiny_cavern.h"
 
-static uint16_t frame_index = 0;
-static uint16_t index_index = 0;
+static uint16_t outer_index = 0; /* Index into the compressed index_data */
+static uint16_t inner_index = 0; /* Index when expanding references into index_data */
+static uint16_t frame_index = 0; /* Index into frame data */
 
 
 /*
@@ -93,16 +94,38 @@ static void nibble_done ()
 static void tick ()
 {
     static uint8_t delay = 0;
+    static uint16_t segment_end = 0;
 
     /* Read and process the next frame */
     if (delay == 0)
     {
+        uint16_t element;
         uint8_t frame;
         uint8_t data;
 
+        /* If we are not already processing a segment of referenced
+         * data, read a new element from the compressed index_data */
+        if (inner_index == segment_end)
+        {
+            element = pgm_read_word (&(index_data[outer_index++]));
+
+            if (element & 0x8000)
+            {
+                /* Segment */
+                inner_index = element & 0x0fff;
+                segment_end = inner_index + ((element >> 12) & 0x0007) + 2;
+            }
+            else
+            {
+                /* Single index */
+                inner_index = outer_index - 1;
+                segment_end = outer_index;
+            }
+        }
+
         /* Read the delay and frame_index from the index_data */
-        frame_index = pgm_read_word (&(index_data[index_index++]));
-        delay = (frame_index >> 12) + 1;
+        frame_index = pgm_read_word (&(index_data[inner_index++]));
+        delay = ((frame_index >> 12) & 0x0007) + 1;
         frame_index &= 0x0fff;
 
         /* Read the frame header from the frame_data */
@@ -165,9 +188,11 @@ static void tick ()
     }
 
     /* Check for end of data and loop */
-    if (index_index == END_FRAME_INDEX)
+    if (outer_index == END_FRAME_INDEX)
     {
-        index_index = LOOP_FRAME_INDEX;
+        outer_index = LOOP_FRAME_INDEX_OUTER;
+        inner_index = LOOP_FRAME_INDEX_INNER;
+        segment_end = LOOP_FRAME_SEGMENT_END;
     }
 
     /* Decrement the delay counter */

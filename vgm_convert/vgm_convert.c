@@ -53,7 +53,13 @@ static uint16_t index_data [OUTPUT_SIZE_MAX + 10] = { 0 };
 static uint16_t index_data_count = 0;
 static uint16_t loop_frame_index = 0;
 
-#define TOTAL_SIZE (frame_data_size + index_data_count * 2)
+static uint16_t compressed_index_data [OUTPUT_SIZE_MAX + 10] = {};
+static uint16_t compressed_index_data_count = 0;
+static uint16_t loop_frame_index_outer = 0;
+static uint16_t loop_frame_index_inner = 0;
+static uint16_t loop_frame_segment_end = 0;
+
+#define TOTAL_SIZE (frame_data_size + compressed_index_data_count * 2)
 
 /* Holding space for newly generated frame */
 #define FRAME_SIZE_MAX 8
@@ -197,6 +203,11 @@ uint16_t generate_frame (void)
  *
  * If the frame is new, it is added both to frame_data and index_data.
  * If the frame is a duplicate, it is only added to index_data.
+ *
+ * Format:
+ *  [15]     - Always output 0, reserved for use by compression
+ *  [14..12] - Delay, 1/60 to 8/60s
+ *  [11..0]  - Index into frame data
  */
 void write_frame (void)
 {
@@ -210,13 +221,7 @@ void write_frame (void)
     {
         if (memcmp (new_frame, &(frame_data [frame_indexes [i]]), new_frame_size) == 0)
         {
-            /* Found - Output the index and return */
-            /* TODO: Extra delays will be lost, so should be handled here
-             *       instead of emitted by generate_frame. Remember to use
-             *       0000 for 1/60, as 0/60 shouldn't happen.
-             *       Also consider a different split, such as 3.13 instead
-             *       of 4.12 if we need >4K of unique frames.
-             *       */
+            /* Found */
             index = frame_indexes [i];
             break;
         }
@@ -241,7 +246,7 @@ void write_frame (void)
         }
     }
 
-    if (frame_delay <= 16)
+    if (frame_delay <= 8)
     {
         uint16_t delay_bits = (frame_delay - 1) << 12;
         index_data [index_data_count++] = delay_bits | index;
@@ -249,12 +254,12 @@ void write_frame (void)
     else
     {
         /* More than 16/60s delay requires multiple indexes */
-        index_data [index_data_count++] = 0xf000 | index;
-        frame_delay -= 16;
+        index_data [index_data_count++] = 0x7000 | index;
+        frame_delay -= 8;
 
         while (frame_delay)
         {
-            if (frame_delay <= 16)
+            if (frame_delay <= 8)
             {
                 uint16_t delay_bits = (frame_delay - 1) << 12;
                 index_data [index_data_count++] = delay_bits;
@@ -262,11 +267,97 @@ void write_frame (void)
             }
             else
             {
-                index_data [index_data_count++] = 0xf000;
-                frame_delay -= 16;
+                index_data [index_data_count++] = 0x7000;
+                frame_delay -= 8;
             }
         }
     }
+}
+
+
+/*
+ * Find repeating segments within index_data and use
+ * references to these to save space.
+ *
+ * Format:
+ *  [15]     - If 1, this entry refers to a sequence of previous indexes.
+ *  [14..12] - Length of matching sequence, 2-9 words.
+ *  [11..0]  - Index into compressed data.
+ */
+void compress_indexes (void)
+{
+    uint16_t match_length = 0;
+
+    /* Iterate over non-compressed data, adding it to the compressed data */
+    for (uint32_t i = 0; i < index_data_count; i += match_length)
+    {
+        uint16_t longest_segment_index = 0;
+        uint16_t longest_segment_length = 0;
+        match_length = 0;
+
+        /* Iterate over compressed data, finding the longest matching segment */
+        for (uint32_t j = 0; j < compressed_index_data_count; j++)
+        {
+            /* Check the length of this match */
+            for (uint32_t k = 0; i + k < index_data_count && j + k < compressed_index_data_count; k++)
+            {
+                if (compressed_index_data [j + k] == index_data [i + k])
+                {
+                    if (k + 1 > longest_segment_length)
+                    {
+                        longest_segment_index = j;
+                        longest_segment_length = k + 1;
+                    }
+                }
+                else
+                {
+                    break;
+                }
+            }
+        }
+
+        if (longest_segment_length >= 2)
+        {
+            /* Limit match length */
+            if (longest_segment_length > 9)
+            {
+                longest_segment_length = 9;
+            }
+
+            /* Emit reference - 3 bits of length, 12 bits of index */
+            compressed_index_data [compressed_index_data_count++] = 0x8000 | ((longest_segment_length - 2) << 12) | longest_segment_index;
+            match_length = longest_segment_length;
+        }
+        else
+        {
+            /* Emit index */
+            compressed_index_data [compressed_index_data_count++] = index_data [i];
+            match_length = 1;
+        }
+
+        if (loop_frame_index_outer == 0 &&
+            i + (match_length - 1) >= loop_frame_index)
+        {
+            /* Outer index points at the next compressed element to play after this segment */
+            loop_frame_index_outer = compressed_index_data_count;
+
+            /* Inner index points to the loop frame itself */
+            if (longest_segment_length >= 2)
+            {
+                uint8_t depth = loop_frame_index - i;
+                loop_frame_index_inner = longest_segment_index + depth;
+                loop_frame_segment_end = longest_segment_index + match_length;
+            }
+            else
+            {
+                loop_frame_index_inner = loop_frame_index_outer - 1;
+                loop_frame_segment_end = loop_frame_index_outer;
+            }
+            uint16_t depth = i + match_length - loop_frame_index;
+        }
+    }
+
+    fprintf (stderr, "Compressed indexes: %d bytes (%d indexes).\n", compressed_index_data_count * 2, compressed_index_data_count);
 }
 
 
@@ -475,14 +566,18 @@ int main (int argc, char **argv)
         }
     }
 
-    if (TOTAL_SIZE >= (8192 - 640))
+    compress_indexes ();
+
+    if (TOTAL_SIZE >= (8192 - 724))
     {
         fprintf (stderr, "Warning: Output size %d.%02d KiB may not fit on ATMEGA-8.\n",
                  TOTAL_SIZE / 1024, (TOTAL_SIZE % 1024) * 100 / 1024);
     }
 
-    printf ("#define LOOP_FRAME_INDEX %d\n", loop_frame_index);
-    printf ("#define END_FRAME_INDEX %d\n\n", index_data_count);
+    printf ("#define LOOP_FRAME_INDEX_INNER %d\n", loop_frame_index_inner);
+    printf ("#define LOOP_FRAME_INDEX_OUTER %d\n", loop_frame_index_outer);
+    printf ("#define LOOP_FRAME_SEGMENT_END %d\n", loop_frame_segment_end);
+    printf ("#define END_FRAME_INDEX %d\n\n", compressed_index_data_count);
 
     printf ("const uint8_t frame_data [] PROGMEM = {\n");
     for (int i = 0; i < frame_data_size; i++)
@@ -508,14 +603,14 @@ int main (int argc, char **argv)
     printf ("};\n\n");
 
     printf ("const uint16_t index_data [] PROGMEM = {\n");
-    for (int i = 0; i < index_data_count; i++)
+    for (int i = 0; i < compressed_index_data_count; i++)
     {
         if (i % 8 == 0)
         {
             printf ("    ");
         }
-        printf ("0x%04x%s", index_data [i], i == (index_data_count - 1) ? "\n" : ",");
-        if (i == (index_data_count - 1))
+        printf ("0x%04x%s", compressed_index_data [i], i == (compressed_index_data_count - 1) ? "\n" : ",");
+        if (i == (compressed_index_data_count - 1))
         {
             break;
         }
@@ -532,7 +627,7 @@ int main (int argc, char **argv)
 
     fprintf (stderr, "Done.\n");
     fprintf (stderr, " - %d bytes of frame data. (%d unique frames)\n", frame_data_size, frame_count);
-    fprintf (stderr, " - %d bytes of index data.\n", index_data_count * 2);
+    fprintf (stderr, " - %d bytes of index data.\n", compressed_index_data_count * 2);
     fprintf (stderr, " - %d bytes total.\n", TOTAL_SIZE);
 
     free (buffer);
