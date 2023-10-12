@@ -19,11 +19,14 @@
 #define VOLUME_2_BIT    0x40
 #define VOLUME_3_BIT    0x80
 
-// #include "bridge_zone.h"
-// #include "chocolate.h"
-// #include "louie_louie.h"
-#include "sky_high.h"
-// #include "tiny_cavern.h"
+#include "../aqua_lake.h"
+// #include "../bridge_zone.h"
+// #include "../chocolate.h"
+// #include "../louie_louie.h"
+// #include "../reed_flutes.h"
+// #include "../sky_high.h"
+// #include "../tiny_cavern.h"
+// #include "../turkish_march.h"
 
 static uint16_t outer_index = 0; /* Index into the compressed index_data */
 static uint16_t inner_index = 0; /* Index when expanding references into index_data */
@@ -85,6 +88,29 @@ static void nibble_done ()
         nibble_high = false;
         frame_index++;
     }
+}
+
+
+/*
+ * Update the LEDs on PC{2..5}
+ */
+static void led_update (uint8_t channel, uint8_t data)
+{
+    static uint8_t led_data = 0;
+    const uint8_t threshold = 0x08;
+    channel += 2;
+
+
+    if (data <= threshold)
+    {
+        led_data |= (1 << channel);
+    }
+    else
+    {
+        led_data &= ~(1 << channel);
+    }
+
+    PORTC = led_data;
 }
 
 
@@ -167,21 +193,25 @@ static void tick ()
         {
             data = nibble_read ();
             psg_write (0x80 | 0x10 | data);
+            led_update (0, data);
         }
         if (frame & VOLUME_1_BIT)
         {
             data = nibble_read ();
             psg_write (0x80 | 0x30 | data);
+            led_update (1, data);
         }
         if (frame & VOLUME_2_BIT)
         {
             data = nibble_read ();
             psg_write (0x80 | 0x50 | data);
+            led_update (2, data);
         }
         if (frame & VOLUME_3_BIT)
         {
             data = nibble_read ();
             psg_write (0x80 | 0x70 | data);
+            led_update (3, data);
         }
 
         nibble_done ();
@@ -237,6 +267,10 @@ int main (void)
     /* Configure PortD as output for data */
     DDRD = 0xff;
     PORTD = 0;
+
+    /* Configure PortC as output for LEDs */
+    DDRC = 0x3c;
+    PORTC = 0;
 
     /* Default register values */
     psg_write (0x80 | 0x3f); /* Mute Tone0 */

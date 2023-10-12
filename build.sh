@@ -3,7 +3,7 @@
 # Exit on first error
 set -e
 
-avr-gcc -Os -Wall -mcall-prologues -mmcu=atmega8 main.c -o main.obj
+avr-gcc -Os -Wall -mcall-prologues -mmcu=atmega8 source/main.c -o main.obj
 avr-objcopy -R .eeprom -O ihex main.obj main.hex
 
 if [ "$1" = "write" ]

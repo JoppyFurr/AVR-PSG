@@ -1,3 +1,3 @@
 #!/bin/sh
 
-gcc vgm_convert/*.c -o convert -lz
+gcc source/vgm_convert/*.c -o vgm_convert -lz
