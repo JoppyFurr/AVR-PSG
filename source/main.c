@@ -32,33 +32,31 @@ static uint16_t outer_index = 0; /* Index into the compressed index_data */
 static uint16_t inner_index = 0; /* Index when expanding references into index_data */
 static uint16_t frame_index = 0; /* Index into frame data */
 
+/* Flag for 'is the next nibble to the high nibble of its byte?' */
+static bool nibble_high = false;
+
 
 /*
  * Write one byte of data to the sn76489.
+ * PB0 = ~WE
+ * PB1 = Ready
  */
 static void psg_write (uint8_t data)
 {
-    uint8_t port_b;
-
     PORTD = data;
 
-    port_b = PORTB;
-    port_b &= 0xfe; /* Unset bit 0, ~WE */
-    PORTB = port_b;
+    PORTB &= ~(1 << PB0); /* Unset bit 0, ~WE */
 
     /* Wait for ready signal to go low */
-    while ((PINB & 0x02) == 0x02);
+    while ((PINB & (1 << PB1)) == (1 << PB1));
 
     /* Wait for ready signal to go high */
-    while ((PINB & 0x02) == 0x00);
+    while ((PINB & (1 << PB1)) == 0);
 
     /* De-assert ~WE */
-    PORTB |= 0x01;
+    PORTB |= (1 << PB0);
 }
 
-
-/* Flag for 'is the next nibble to the high nibble of its byte?' */
-static bool nibble_high = false;
 
 /*
  * Read the next nibble from the frame data.

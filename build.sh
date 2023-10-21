@@ -3,7 +3,8 @@
 # Exit on first error
 set -e
 
-avr-gcc -Os -Wall -mcall-prologues -mmcu=atmega8 source/main.c -o main.obj
+# Note:  min-pagesize=0 is a work-around for a bug in GCC 12. Hopefully fixed in GCC 14?
+avr-gcc -Os -Wall -mcall-prologues -mmcu=atmega8 --param=min-pagesize=0 source/main.c -o main.obj
 avr-objcopy -R .eeprom -O ihex main.obj main.hex
 
 if [ "$1" = "write" ]
