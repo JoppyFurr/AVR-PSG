@@ -243,9 +243,19 @@ ISR (TIMER1_COMPA_vect)
 /*
  * Entry point.
  *
- * PortD = Data
  * PortB.0 = Write
- * PorbB.1 = Ready
+ * PortB.1 = SN76489 Ready
+ * PortB.2 = YM2413 A0
+ * PortB.3 = Clock
+ * PortB.4 = YM2413 CS
+ * PortB.5 = YM2413 RESET
+ *
+ * PortC.2 = LED
+ * PortC.3 = LED
+ * PortC.4 = LED
+ * PortC.5 = LED
+ *
+ * PortD = Data
  */
 int main (void)
 {
@@ -260,18 +270,19 @@ int main (void)
     OCR2 = 0; /* Reset the counter every increment */
 
     /* Enable output for clock and write-enable */
-    DDRB |= (1 << DDB0) | (1 << DDB3); /* Enable output */
-
-    /* Configure PortD as output for data */
-    DDRD = 0xff;
-    PORTD = 0;
+    DDRB |= (1 << DDB0) | (1 << DDB2) | (1 << DDB3) | (1 << DDB4) | (1 << DDB5); /* Enable output */
+    PORTB = (1 << PB0) | (1 << PB4); /* Active-low write signals set high to avoid accidental writes */
 
     /* Configure PortC as output for LEDs */
     DDRC = 0x3c;
     PORTC = 0;
 
+    /* Configure PortD as output for data */
+    DDRD = 0xff;
+    PORTD = 0;
+
     /* Default register values */
-    psg_write (0x80 | 0x3f); /* Mute Tone0 */
+    psg_write (0x80 | 0x1f); /* Mute Tone0 */
     psg_write (0x80 | 0x3f); /* Mute Tone1 */
     psg_write (0x80 | 0x5f); /* Mute Tone2 */
     psg_write (0x80 | 0x7f); /* Mute Noise */
@@ -281,6 +292,11 @@ int main (void)
     TCCR1B = (1 << WGM12) | (1 << CS11); /* CTC mode, pre-scale clock by 8 */
     OCR1A = 14914; /* Top value for counter, to give ~60 Hz */
     TIMSK = (1 << OCIE1A); /* Interrupt on Output-compare-A match */
+
+    /* Wait 10ms and then take the ym2413 out of reset */
+    _delay_ms (10);
+    PORTB |= (1 << DDB5);
+    _delay_ms (10);
 
     /* Enable interrupts */
     sei ();
