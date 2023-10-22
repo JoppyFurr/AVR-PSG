@@ -37,13 +37,25 @@ static bool nibble_high = false;
 
 
 /*
+ * Assert an 8-bit value onto the bus.
+ */
+static void data_set (uint8_t data)
+{
+    PORTD &= ~0xfc;
+    PORTD |= data & 0xfc;
+    PORTC &= ~0x03;
+    PORTC |= data & 0x03;
+}
+
+
+/*
  * Write one byte of data to the sn76489.
  * PB0 = ~WE
  * PB1 = Ready
  */
 static void psg_write (uint8_t data)
 {
-    PORTD = data;
+    data_set (data);
 
     PORTB &= ~(1 << PB0); /* Unset bit 0, ~WE */
 
@@ -68,7 +80,7 @@ static void ym2413_write (uint8_t addr, uint8_t data)
 {
     /* Prepare the address at least 10 ns before driving CS low. */
     PORTB &= ~(1 << PB2);   /* A0 = LOW */
-    PORTD = addr;
+    data_set (addr);
     _delay_us(10);
 
     PORTB &= ~(1 << PB4);   /* CS = LOW */
@@ -81,7 +93,7 @@ static void ym2413_write (uint8_t addr, uint8_t data)
 
     /* Prepare the data at least 10 ns before driving CS low. */
     PORTB |= (1 << PB2);    /* A0 = HIGH */
-    PORTD = data;
+    data_set (data);
     _delay_us(10);
 
     /* Write the data */
@@ -145,7 +157,7 @@ static void led_update (uint8_t channel, uint8_t data)
         led_data &= ~(1 << channel);
     }
 
-    PORTC = led_data;
+    PORTC = (PORTC & 0xc3) | led_data;
 }
 
 
@@ -287,12 +299,21 @@ ISR (TIMER1_COMPA_vect)
  * PortB.4 = YM2413 CS
  * PortB.5 = YM2413 RESET
  *
+ * PortC.0 = Data.0
+ * PortC.1 = Data.1
  * PortC.2 = LED
  * PortC.3 = LED
  * PortC.4 = LED
  * PortC.5 = LED
  *
- * PortD = Data
+ * PortD.0 = UART Rx
+ * PortD.1 = UART Tx
+ * PortD.2 = Data.2
+ * PortD.3 = Data.3
+ * PortD.4 = Data.4
+ * PortD.5 = Data.5
+ * PortD.6 = Data.6
+ * PortD.7 = Data.7
  */
 int main (void)
 {
@@ -310,12 +331,12 @@ int main (void)
     DDRB |= (1 << DDB0) | (1 << DDB2) | (1 << DDB3) | (1 << DDB4) | (1 << DDB5); /* Enable output */
     PORTB = (1 << PB0) | (1 << PB4); /* Active-low write signals set high to avoid accidental writes */
 
-    /* Configure PortC as output for LEDs */
-    DDRC = 0x3c;
+    /* Configure PortC as output for two data bits and four LEDs */
+    DDRC = (1 << DDC0) | (1 << DDC1) | (1 << DDC2) | (1 << DDC3) | (1 << DDC4) | (1 << DDC5);
     PORTC = 0;
 
-    /* Configure PortD as output for data */
-    DDRD = 0xff;
+    /* Configure PortD as output for six most significant data bits */
+    DDRD = (1 << DDD2) | (1 << DDD3) | (1 << DDD4) | (1 << DDD5) | (1 << DDD6) | (1 << DDD7);
     PORTD = 0;
 
     /* Default register values */
