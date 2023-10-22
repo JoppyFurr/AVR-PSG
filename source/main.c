@@ -59,6 +59,43 @@ static void psg_write (uint8_t data)
 
 
 /*
+ * Write one register to the ym2413.
+ * TODO: Tune the delays.
+ * PB2 = A0
+ * PB4 = ~CS
+ */
+static void ym2413_write (uint8_t addr, uint8_t data)
+{
+    /* Prepare the address at least 10 ns before driving CS low. */
+    PORTB &= ~(1 << PB2);   /* A0 = LOW */
+    PORTD = addr;
+    _delay_us(10);
+
+    PORTB &= ~(1 << PB4);   /* CS = LOW */
+    _delay_us(10);          /* CS must be held low for at least 80 ns */
+    PORTB |= (1 << PB4);    /* CS = HIGH */
+
+    /* Data needs to be held for 25 ns.
+     * The ym2413 also needs 12 cycles before accepting the next write. */
+    _delay_us(10);
+
+    /* Prepare the data at least 10 ns before driving CS low. */
+    PORTB |= (1 << PB2);    /* A0 = HIGH */
+    PORTD = data;
+    _delay_us(10);
+
+    /* Write the data */
+    PORTB &= ~(1 << PB4);   /* CS = LOW */
+    _delay_us(10);          /* CS must be held low for at least 80 ns */
+    PORTB |= (1 << PB4);    /* CS = HIGH */
+
+    /* Data needs to be held for 25 ns.
+     * The ym2413 also needs 84 cycles before accepting the next write. */
+    _delay_us(10);
+}
+
+
+/*
  * Read the next nibble from the frame data.
  */
 static uint8_t nibble_read ()
