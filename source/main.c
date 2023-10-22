@@ -290,6 +290,63 @@ ISR (TIMER1_COMPA_vect)
 
 
 /*
+ * UART Rx interrupt.
+ */
+ISR (USART_RXC_vect)
+{
+    static uint8_t cmd_latch = 0;
+    uint8_t rx_byte = UDR;
+
+    /* The first byte is an instruction on what to do */
+    if (cmd_latch == 0)
+    {
+        cmd_latch = rx_byte;
+    }
+
+    /* The second byte is the data for that instruction to work with */
+    else
+    {
+        switch (cmd_latch & 0xc0)
+        {
+            case 0x40:
+                /* PSG write */
+                psg_write (rx_byte);
+
+                /* LED update */
+                switch (rx_byte & 0xf0)
+                {
+                    case 0x90:
+                        led_update (0, rx_byte & 0x0f);
+                        break;
+                    case 0xB0:
+                        led_update (1, rx_byte & 0x0f);
+                        break;
+                    case 0xD0:
+                        led_update (2, rx_byte & 0x0f);
+                        break;
+                    case 0xF0:
+                        led_update (3, rx_byte & 0x0f);
+                        break;
+                    default:
+                        break;
+
+                }
+                break;
+
+            case 0x80:
+                /* YM2413 write */
+                ym2413_write (cmd_latch & 0x3f, rx_byte);
+                break;
+
+            default:
+        }
+
+        cmd_latch = 0;
+    }
+}
+
+
+/*
  * Entry point.
  *
  * PortB.0 = Write
@@ -355,6 +412,11 @@ int main (void)
     _delay_ms (10);
     PORTB |= (1 << DDB5);
     _delay_ms (10);
+
+    /* Configure the UART */
+    UBRRL = 46; /* 9600 Baud */
+    UCSRB = (1 << RXEN) | (1 << RXCIE); /* Receive only, with interrupt */
+    UCSRC = (1 << URSEL) | (1 << UCSZ0) | (1 << UCSZ1); /* 8N1 */
 
     /* Enable interrupts */
     sei ();
