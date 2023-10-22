@@ -300,7 +300,29 @@ ISR (USART_RXC_vect)
     /* The first byte is an instruction on what to do */
     if (cmd_latch == 0)
     {
-        cmd_latch = rx_byte;
+        if (rx_byte == 0x01)
+        {
+            /* 0x01 is a request to reset */
+            psg_write (0x80 | 0x1f); /* Mute Tone0 */
+            psg_write (0x80 | 0x3f); /* Mute Tone1 */
+            psg_write (0x80 | 0x5f); /* Mute Tone2 */
+            psg_write (0x80 | 0x7f); /* Mute Noise */
+
+            PORTB &= ~(1 << DDB5);
+            _delay_ms (10);
+            PORTB |= (1 << DDB5);
+            _delay_ms (10);
+
+            /* Turn off the LEDs too */
+            led_update (0, 0x0f);
+            led_update (1, 0x0f);
+            led_update (2, 0x0f);
+            led_update (3, 0x0f);
+        }
+        else
+        {
+            cmd_latch = rx_byte;
+        }
     }
 
     /* The second byte is the data for that instruction to work with */

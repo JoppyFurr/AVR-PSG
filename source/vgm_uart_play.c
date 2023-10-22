@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 
 #include <fcntl.h>
 #include <errno.h>
@@ -13,6 +14,7 @@
 
 /* State tracking */
 static uint32_t samples_delay = 0;
+static int uart_fd = -1;
 
 void handle_delay (void)
 {
@@ -21,15 +23,30 @@ void handle_delay (void)
     samples_delay = 0;
 }
 
-void uart_write (int fd, uint8_t data)
+void uart_write (uint8_t data)
 {
-    int ret = write (fd, &data, 1);
+    int ret = write (uart_fd, &data, 1);
 
     if (ret != 1)
     {
         fprintf (stderr, "UART Write returns %d.\n", ret);
     }
 }
+
+
+/*
+ * Stop sustained tones before exiting.
+ */
+void sigint_handler (int dummy)
+{
+    if (uart_fd >= 0)
+    {
+        uart_write (0x00);
+        uart_write (0x01);
+        exit (0);
+    }
+}
+
 
 /*
  * Entry point.
@@ -45,7 +62,7 @@ int main (int argc, char **argv)
     uint32_t vgm_offset = 0;
 
     /* Serial I/O */
-    int uart_fd = open ("/dev/ttyUSB0", O_RDWR);
+    uart_fd = open ("/dev/ttyUSB0", O_RDWR);
     if (uart_fd < 0)
     {
         fprintf (stderr, "Cannot open ttyUSB0: %s.\n", strerror (errno));
@@ -86,7 +103,11 @@ int main (int argc, char **argv)
     }
 
     /* Send a zero to clear the command latch */
-    uart_write (uart_fd, 0);
+    uart_write (0x00);
+    uart_write (0x01);
+
+    /* Set up signal handling to quiet the chips on exit */
+    signal (SIGINT, sigint_handler);
 
     uint8_t command = 0;
     uint8_t addr = 0;
@@ -149,8 +170,8 @@ int main (int argc, char **argv)
                 handle_delay ();
             }
             data = buffer[i++];
-            uart_write (uart_fd, 0x40);
-            uart_write (uart_fd, data);
+            uart_write (0x40);
+            uart_write (data);
             break;
 
         case 0x51: /* YM2413 */
@@ -160,8 +181,8 @@ int main (int argc, char **argv)
             }
             addr = buffer[i++];
             data = buffer[i++];
-            uart_write (uart_fd, 0x80 | addr);
-            uart_write (uart_fd, data);
+            uart_write (0x80 | addr);
+            uart_write (data);
             break;
 
         case 0x61: /* Wait n 44.1 KHz samples */
