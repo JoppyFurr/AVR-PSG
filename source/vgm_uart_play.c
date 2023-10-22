@@ -7,8 +7,9 @@
 
 #include <fcntl.h>
 #include <errno.h>
-#include <termios.h>
 #include <unistd.h>
+#include <asm/termbits.h>
+#include <sys/ioctl.h>
 
 #include "vgm_convert/vgm_read.h"
 
@@ -69,20 +70,25 @@ int main (int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    struct termios uart_attributes;
-    if (tcgetattr (uart_fd, &uart_attributes) != 0)
+    struct termios2 uart_attributes;
+    if (ioctl (uart_fd, TCGETS2, &uart_attributes) == -1)
     {
         fprintf (stderr, "Cannot get uart attributes: %s.\n", strerror (errno));
         return EXIT_FAILURE;
     }
 
     uart_attributes.c_cflag &= CSIZE;
-    uart_attributes.c_cflag |= CS8;     /* 8 */
-    uart_attributes.c_cflag &= ~PARENB; /* N */
-    uart_attributes.c_cflag &= ~CSTOPB; /* 1 */
-    uart_attributes.c_cflag &= ~CRTSCTS; /* Disable flow-control */
-    uart_attributes.c_cflag |= CREAD;   /* Enable reading */
-    uart_attributes.c_cflag |= CLOCAL;  /* Ignore modem lines */
+    uart_attributes.c_cflag |= CS8;         /* 8 */
+    uart_attributes.c_cflag &= ~PARENB;     /* N */
+    uart_attributes.c_cflag &= ~CSTOPB;     /* 1 */
+    uart_attributes.c_cflag &= ~CRTSCTS;    /* Disable flow-control */
+    uart_attributes.c_cflag |= CREAD;       /* Enable reading */
+    uart_attributes.c_cflag |= CLOCAL;      /* Ignore modem lines */
+    uart_attributes.c_cflag &= ~CBAUD;
+    uart_attributes.c_cflag |= CBAUDEX;    /* Use custom baud rate */
+
+    uart_attributes.c_ispeed = 28800;       /* 28.8 k */
+    uart_attributes.c_ospeed = 28800;
 
     uart_attributes.c_lflag &= ~ICANON; /* Disable canonical mode */
     uart_attributes.c_lflag &= ~(ECHO | ECHOE | ECHONL); /* Disable echo */
@@ -94,9 +100,7 @@ int main (int argc, char **argv)
 
     uart_attributes.c_oflag &= ~(OPOST | ONLCR); /* Disable handling of special bytes (Tx) */
 
-    cfsetspeed(&uart_attributes, B9600);
-
-    if (tcsetattr(uart_fd, TCSANOW, &uart_attributes) != 0)
+    if (ioctl(uart_fd, TCSETS2, &uart_attributes) == -1)
     {
         fprintf (stderr, "Cannot set uart attributes: %s.\n", strerror (errno));
         return EXIT_FAILURE;
@@ -105,6 +109,8 @@ int main (int argc, char **argv)
     /* Send a zero to clear the command latch */
     uart_write (0x00);
     uart_write (0x01);
+    usleep (100000);
+
 
     /* Set up signal handling to quiet the chips on exit */
     signal (SIGINT, sigint_handler);

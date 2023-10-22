@@ -50,6 +50,7 @@ static void data_set (uint8_t data)
 
 /*
  * Write one byte of data to the sn76489.
+ * Takes ~10 µs
  * PB0 = ~WE
  * PB1 = Ready
  */
@@ -72,6 +73,7 @@ static void psg_write (uint8_t data)
 
 /*
  * Write one register to the ym2413.
+ * Takes ~80 µs.
  * TODO: Tune the delays.
  * PB2 = A0
  * PB4 = ~CS
@@ -436,7 +438,8 @@ int main (void)
     _delay_ms (10);
 
     /* Configure the UART */
-    UBRRL = 46; /* 9600 Baud */
+    UCSRA |= (1 << U2X); /* U2X mode for more accurate timing */
+    UBRRL = 30; /* 28800 Baud */
     UCSRB = (1 << RXEN) | (1 << RXCIE); /* Receive only, with interrupt */
     UCSRC = (1 << URSEL) | (1 << UCSZ0) | (1 << UCSZ1); /* 8N1 */
 
