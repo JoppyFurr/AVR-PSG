@@ -17,6 +17,20 @@
 static uint32_t samples_delay = 0;
 static int uart_fd = -1;
 
+/* TODO: The combination of how handle_delay works
+ *       and how we call a potentially blocking write
+ *       to the UART mean that the music will play
+ *       slightly too slow.
+ *
+ *       One option is to move uart writes to a
+ *       separate thread. A better solution may be to
+ *       update handle_delay so that it waits until
+ *       a specific wall-time has been reached.
+ */
+
+/*
+ * Wait the expected amount of time between register writes.
+ */
 void handle_delay (void)
 {
     /* Convert 44.1 kHz samples into µs */
@@ -24,6 +38,10 @@ void handle_delay (void)
     samples_delay = 0;
 }
 
+
+/*
+ * Write a byte to the UART.
+ */
 void uart_write (uint8_t data)
 {
     int ret = write (uart_fd, &data, 1);

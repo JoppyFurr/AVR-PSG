@@ -61,10 +61,6 @@ static void psg_write (uint8_t data)
 
 
 /*
- * TODO: Sort out why RMW is needed for port access...
- */
-
-/*
  * Write one register to the ym2413.
  * PB2 = A0
  * PB4 = ~CS
