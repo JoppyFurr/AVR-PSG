@@ -19,6 +19,25 @@
 #define VOLUME_2_BIT    0x40
 #define VOLUME_3_BIT    0x80
 
+/* When UART_BUILD is defined, the sound data is
+ * expected to come in on PortD.0 at 28800 baud.
+ * Both the SN76489 and YM2413 are supported in
+ * UART mode.
+ *
+ * When EMBED_BUILD is defined, a piece of music
+ * is embedded in the image for the micro-controller.
+ * The music should be processed by the vgm_convert
+ * tool.
+ *
+ * In EMBED_BUILD, YM2413 support has not yet been
+ * combined into this source file. A separate file,
+ * main_fm.c, contains an initial implementation
+ * without compression. */
+#define UART_BUILD
+// #define EMBED_BUILD
+
+#ifdef EMBED_BUILD
+
 #include "../aqua_lake.h"
 // #include "../bridge_zone.h"
 // #include "../chocolate.h"
@@ -34,6 +53,8 @@ static uint16_t frame_index = 0; /* Index into frame data */
 
 /* Flag for 'is the next nibble to the high nibble of its byte?' */
 static bool nibble_high = false;
+
+#endif /* EMBED_BUILD */
 
 
 /*
@@ -78,6 +99,7 @@ static void psg_write (uint8_t data)
  * PB2 = A0
  * PB4 = ~CS
  */
+#ifdef UART_BUILD
 static void ym2413_write (uint8_t addr, uint8_t data)
 {
     /* Prepare the address at least 10 ns before driving CS low. */
@@ -107,11 +129,13 @@ static void ym2413_write (uint8_t addr, uint8_t data)
      * The ym2413 also needs 84 cycles before accepting the next write. */
     _delay_us(10);
 }
+#endif
 
 
 /*
  * Read the next nibble from the frame data.
  */
+#ifdef EMBED_BUILD
 static uint8_t nibble_read ()
 {
     if (nibble_high)
@@ -138,6 +162,7 @@ static void nibble_done ()
         frame_index++;
     }
 }
+#endif
 
 
 /*
@@ -166,6 +191,7 @@ static void led_update (uint8_t channel, uint8_t data)
 /*
  * Called every 1/60s to apply the next set of register writes.
  */
+#ifdef EMBED_BUILD
 static void tick ()
 {
     static uint8_t delay = 0;
@@ -289,11 +315,13 @@ ISR (TIMER1_COMPA_vect)
 {
     tick ();
 }
+#endif /* EMBED_BUILD */
 
 
 /*
  * UART Rx interrupt.
  */
+#ifdef UART_BUILD
 ISR (USART_RXC_vect)
 {
     static uint8_t cmd_latch = 0;
@@ -368,6 +396,7 @@ ISR (USART_RXC_vect)
         cmd_latch = 0;
     }
 }
+#endif /* UART_BUILD */
 
 
 /*
@@ -426,22 +455,26 @@ int main (void)
     psg_write (0x80 | 0x5f); /* Mute Tone2 */
     psg_write (0x80 | 0x7f); /* Mute Noise */
 
+#ifdef EMBED_BUILD
     /* Use timer 1 to generate a 60 Hz interrupt */
     TCCR1A = 0;
     TCCR1B = (1 << WGM12) | (1 << CS11); /* CTC mode, pre-scale clock by 8 */
     OCR1A = 14914; /* Top value for counter, to give ~60 Hz */
     TIMSK = (1 << OCIE1A); /* Interrupt on Output-compare-A match */
+#endif /* EMBED_BUILD */
 
     /* Wait 10ms and then take the ym2413 out of reset */
     _delay_ms (10);
     PORTB |= (1 << DDB5);
     _delay_ms (10);
 
+#ifdef UART_BUILD
     /* Configure the UART */
     UCSRA |= (1 << U2X); /* U2X mode for more accurate timing */
     UBRRL = 30; /* 28800 Baud */
     UCSRB = (1 << RXEN) | (1 << RXCIE); /* Receive only, with interrupt */
     UCSRC = (1 << URSEL) | (1 << UCSZ0) | (1 << UCSZ1); /* 8N1 */
+#endif /* UART_BUILD */
 
     /* Enable interrupts */
     sei ();
