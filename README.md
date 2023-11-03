@@ -46,11 +46,9 @@ Remember to update `main.c` to include the generated header file.
 Initial work has been done to add support for embedding YM2413
 music. However, this has not yet been combined into the main
 tools. Instead, there is a separate `main_fm.c` and `vgm_convert_fm.c`.
-Build files will need to be updated to use these instead of the
-normal source files.
 
-Mixed FM and PSG sound is not yet supported, and compression has
-not yet been implemented.
+Embedding both FM and PSG sound is not yet supported, and
+compression has not yet been implemented for FM.
 
 
 
