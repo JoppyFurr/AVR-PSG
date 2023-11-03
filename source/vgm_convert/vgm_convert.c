@@ -560,6 +560,14 @@ int main (int argc, char **argv)
             samples_delay += 1 + (buffer [i] & 0x0f);
             break;
 
+        case 0xa0: /* AY8910 - Ignore */
+            i += 2;
+            break;
+
+        case 0xd2: /* SCC - Ignore */
+            i += 3;
+            break;
+
         default:
             fprintf (stderr, "Unknown command %02x.\n", buffer [i]);
             break;
